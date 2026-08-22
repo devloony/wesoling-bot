@@ -923,22 +923,15 @@ async def setup_commands():
 
 @dp.message(Command("start"))
 async def start_command(message: Message):
-    ensure_user(
-        message.from_user.id,
-        message.from_user.username
-    )
-
-    balance = get_balance(message.from_user.id)
-
     text = (
         "👋 <b>Добро пожаловать в Wesoling Tournament!</b>\n\n"
-        "Это бот поддержки турниров по PUBG Mobile.\n\n"
-        "🏆 /reg — регистрация\n"
-        "🛒 /shop — магазин WesoCoins\n"
+        "Это бот турниров Wesoling по PUBG Mobile.\n\n"
+        "<b>Основные команды:</b>\n\n"
+        "📝 /reg — регистрация\n"
+        "🛒 /shop — магазин\n"
         "💰 /balance — баланс\n"
         "📖 /rules — правила\n"
-        "❓ /help — поддержка\n\n"
-        f"💎 Ваш баланс: <b>{balance} WesoCoins</b>"
+        "❓ /help — поддержка"
     )
 
     await message.answer(text)
