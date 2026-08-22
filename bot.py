@@ -775,6 +775,10 @@ def valid_game_id(text):
 # FSM
 # =========================================================
 
+class ShopPurchase(StatesGroup):
+    amount = State()
+
+
 class Registration(StatesGroup):
     tournament = State()
 
@@ -1051,41 +1055,70 @@ async def shop_command(message: Message):
 # =========================================================
 
 @dp.callback_query(F.data == "shop_buy_coins")
-async def shop_buy_coins(callback: CallbackQuery):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💬 Купить WesoCoins",
-                    url=f"https://t.me/{PAYMENT_USERNAME}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
-                    callback_data="shop_back"
-                )
-            ]
-        ]
-    )
-
+async def shop_buy_coins(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.edit_text(
-        "💎 <b>Покупка WesoCoins</b>\n\n"
-        "Курс:\n"
-        "<b>1 ₽ = 1 WesoCoin</b>\n\n"
-        "Например:\n"
-        "100 ₽ = 100 WesoCoins\n"
-        "250 ₽ = 250 WesoCoins\n"
-        "500 ₽ = 500 WesoCoins\n\n"
-        "Для покупки напишите:\n"
-        f"@{PAYMENT_USERNAME}",
-        reply_markup=keyboard
+        "💎 <b>Купить WesoCoins</b>\n\n"
+        "Какое количество WesoCoins вы хотите купить?"
     )
-
+    await state.set_state(ShopPurchase.amount)
     await callback.answer()
 
 
-# =========================================================
+@dp.message(ShopPurchase.amount)
+async def shop_purchase_amount(message: Message, state: FSMContext):
+    if not message.text or not re.fullmatch(r"\d+", message.text.strip()):
+        await message.answer("❌ Введите целое количество WesoCoins, например: <code>100</code>.")
+        return
+
+    amount = int(message.text.strip())
+    if amount <= 0:
+        await message.answer("❌ Количество должно быть больше 0.")
+        return
+
+    await state.update_data(coins_amount=amount)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Рубли", callback_data="shop_pay_rub")],
+        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="shop_pay_stars")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_back")]
+    ])
+    await message.answer(
+        f"💎 <b>{amount} WesoCoins</b>\n\n"
+        "Выберите способ оплаты:\n\n"
+        f"💳 Рубли — <b>{amount} ₽</b>\n"
+        f"⭐ Telegram Stars — <b>{amount} ⭐</b>\n\n"
+        "Курс: <b>1 ⭐ = 1 ₽</b>", reply_markup=keyboard
+    )
+
+
+@dp.callback_query(F.data.in_({"shop_pay_rub", "shop_pay_stars"}))
+async def shop_purchase_payment(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    amount = data.get("coins_amount")
+    if not amount:
+        await state.clear()
+        await callback.answer("Начните покупку заново.", show_alert=True)
+        return
+    if callback.data == "shop_pay_rub":
+        payment, payment_amount = "Рубли", f"{amount} ₽"
+    else:
+        payment, payment_amount = "Telegram Stars", f"{amount} ⭐"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Написать для оплаты", url=f"https://t.me/{PAYMENT_USERNAME}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_buy_coins")]
+    ])
+    await callback.message.edit_text(
+        "💎 <b>Покупка WesoCoins</b>\n\n"
+        f"Количество: <b>{amount} WesoCoins</b>\n"
+        f"Способ оплаты: <b>{payment}</b>\n"
+        f"К оплате: <b>{payment_amount}</b>\n\n"
+        "Курс: <b>1 ⭐ = 1 ₽</b>\n\n"
+        f"Для оплаты напишите @{PAYMENT_USERNAME}.", reply_markup=keyboard
+    )
+    await state.clear()
+    await callback.answer()
+
+
 # SHOP — PASSES
 # =========================================================
 
