@@ -42,6 +42,11 @@ DB_NAME = "wesoling.db"
 # 1 рубль = 1 WesoCoin
 COIN_PRICE_RUB = 1
 
+# Пакеты PUBG Mobile UC.
+# Цены здесь специально не зашиты: их можно указать у менеджера,
+# чтобы не привязывать магазин к конкретному региону/курсу PUBG Mobile.
+UC_PACKAGES = [60, 325, 660, 1800, 3850, 8100]
+
 
 # =========================================================
 # CUSTOM EMOJI
@@ -1023,6 +1028,12 @@ async def shop_command(message: Message):
             ],
             [
                 InlineKeyboardButton(
+                    text="🎮 Купить UC",
+                    callback_data="shop_buy_uc"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🏆 Проходки",
                     callback_data="shop_passes"
                 )
@@ -1041,7 +1052,7 @@ async def shop_command(message: Message):
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
         "WesoCoins можно использовать для оплаты "
         "проходок на турниры.\n\n"
-        "💰 1 ₽ = 1 WesoCoin.",
+        "💰 1 ₽  1⭐ = 1 WesoCoin.",
         reply_markup=keyboard
     )
 
@@ -1072,12 +1083,94 @@ async def shop_buy_coins(callback: CallbackQuery):
     await callback.message.edit_text(
         "💎 <b>Покупка WesoCoins</b>\n\n"
         "Курс:\n"
-        "<b>1 ₽ = 1 WesoCoin</b>\n\n"
+        "<b>1 ₽  1⭐ = 1 WesoCoin</b>\n\n"
         "Например:\n"
         "50 ₽ = 50 WesoCoins\n"
         "100 ₽ = 100 WesoCoins\n"
         "250 ₽ = 250 WesoCoins\n\n"
         "Для покупки напишите:\n"
+        f"@{PAYMENT_USERNAME}",
+        reply_markup=keyboard
+    )
+
+    await callback.answer()
+
+
+# =========================================================
+# SHOP — BUY UC
+# =========================================================
+
+@dp.callback_query(F.data == "shop_buy_uc")
+async def shop_buy_uc(callback: CallbackQuery):
+    buttons = []
+
+    for amount in UC_PACKAGES:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🎮 {amount} UC",
+                callback_data=f"shop_uc:{amount}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="shop_back"
+        )
+    ])
+
+    await callback.message.edit_text(
+        "🎮 <b>Покупка UC</b>\n\n"
+        "Выберите количество UC:\n\n"
+        "💳 Оплата и актуальная стоимость — у менеджера.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
+    )
+
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("shop_uc:"))
+async def shop_uc(callback: CallbackQuery):
+    try:
+        amount = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer(
+            "Некорректное количество UC.",
+            show_alert=True
+        )
+        return
+
+    if amount not in UC_PACKAGES:
+        await callback.answer(
+            "Такого пакета UC нет.",
+            show_alert=True
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💬 Купить UC",
+                    url=f"https://t.me/{PAYMENT_USERNAME}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="shop_buy_uc"
+                )
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🎮 <b>Покупка UC</b>\n\n"
+        f"📦 Количество: <b>{amount} UC</b>\n\n"
+        "Для покупки напишите менеджеру.\n"
+        "Он сообщит актуальную стоимость и способ оплаты:\n"
         f"@{PAYMENT_USERNAME}",
         reply_markup=keyboard
     )
@@ -1231,6 +1324,12 @@ async def shop_back(callback: CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
+                    text="🎮 Купить UC",
+                    callback_data="shop_buy_uc"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🏆 Проходки",
                     callback_data="shop_passes"
                 )
@@ -1247,7 +1346,7 @@ async def shop_back(callback: CallbackQuery):
     await callback.message.edit_text(
         "🛒 <b>МАГАЗИН WESOLING</b>\n\n"
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
-        "1 ₽ = 1 WesoCoin.",
+        "1 ₽  1⭐ = 1 WesoCoin.",
         reply_markup=keyboard
     )
 
