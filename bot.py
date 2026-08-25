@@ -75,6 +75,19 @@ UC_PACKAGES = {
     360: 575,
 }
 
+# =========================================================
+# ПАКЕТЫ TELEGRAM STARS
+# =========================================================
+# Закупочная цена в ₽ указана для расчёта; клиент оплачивает WesoCoins.
+# Количество Stars всегда равно количеству выдаваемых Stars.
+STARS_PACKAGES = {
+    50: {"cost_rub": 75, "price": 85},
+    75: {"cost_rub": 115, "price": 130},
+    100: {"cost_rub": 153, "price": 175},
+    150: {"cost_rub": 230, "price": 260},
+    200: {"cost_rub": 305, "price": 345},
+}
+
 
 # =========================================================
 # CUSTOM EMOJI
@@ -1097,6 +1110,12 @@ async def shop_command(message: Message):
             ],
             [
                 InlineKeyboardButton(
+                    text="⭐ Купить Stars",
+                    callback_data="shop_buy_stars"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🏆 Проходки",
                     callback_data="shop_passes"
                 )
@@ -1114,7 +1133,7 @@ async def shop_command(message: Message):
         "🛒 <b>МАГАЗИН WESOLING</b>\n\n"
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
         "WesoCoins можно использовать для "
-        "покупки UC и оплаты проходок.\n\n"
+        "покупки UC, Stars и оплаты проходок.\n\n"
         "💰 1 WesoCoin = 1 ₽.",
         reply_markup=keyboard
     )
@@ -1436,6 +1455,159 @@ async def confirm_uc_purchase(
 
 
 # =========================================================
+# SHOP — BUY STARS
+# =========================================================
+
+@dp.callback_query(F.data == "shop_buy_stars")
+async def shop_buy_stars(callback: CallbackQuery):
+    ensure_user(
+        callback.from_user.id,
+        callback.from_user.username
+    )
+
+    balance = get_balance(callback.from_user.id)
+    buttons = []
+
+    for amount, package in STARS_PACKAGES.items():
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"⭐ {amount} Stars — {package['price']} ₽ / {package['price']} WesoCoins",
+                callback_data=f"shop_stars:{amount}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="shop_back"
+        )
+    ])
+
+    await callback.message.edit_text(
+        "⭐ <b>Покупка Telegram Stars</b>\n\n"
+        f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
+        "Выберите количество Stars.\n"
+        "📦 Сколько Stars выберете — столько Stars и получите.\n\n"
+        "💳 Оплата производится <b>только WesoCoins</b>.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+    await callback.answer()
+
+
+# =========================================================
+# SHOP — STARS SELECT
+# =========================================================
+
+@dp.callback_query(F.data.startswith("shop_stars:"))
+async def shop_stars(callback: CallbackQuery):
+    try:
+        amount = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректное количество Stars.", show_alert=True)
+        return
+
+    if amount not in STARS_PACKAGES:
+        await callback.answer("Такого пакета Stars нет.", show_alert=True)
+        return
+
+    price = STARS_PACKAGES[amount]["price"]
+    balance = get_balance(callback.from_user.id)
+
+    if balance < price:
+        await callback.message.edit_text(
+            "❌ <b>Недостаточно WesoCoins</b>\n\n"
+            f"⭐ Пакет: <b>{amount} Stars</b>\n"
+            f"💰 Стоимость: <b>{price} WesoCoins</b>\n"
+            f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
+            f"Вам не хватает: <b>{price - balance} WesoCoins</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Купить WesoCoins", callback_data="shop_buy_coins")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_buy_stars")]
+            ])
+        )
+        await callback.answer("Недостаточно WesoCoins.", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "⭐ <b>Подтверждение покупки Stars</b>\n\n"
+        f"📦 Количество: <b>{amount} ⭐</b>\n"
+        f"💰 Стоимость: <b>{price} WesoCoins</b>\n"
+        f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
+        "После подтверждения WesoCoins будут списаны с вашего баланса.\n\n"
+        "Продолжить?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Купить за WesoCoins", callback_data=f"confirm_stars:{amount}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_buy_stars")]
+        ])
+    )
+    await callback.answer()
+
+
+# =========================================================
+# SHOP — CONFIRM STARS PURCHASE
+# =========================================================
+
+@dp.callback_query(F.data.startswith("confirm_stars:"))
+async def confirm_stars_purchase(callback: CallbackQuery):
+    try:
+        amount = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка покупки.", show_alert=True)
+        return
+
+    if amount not in STARS_PACKAGES:
+        await callback.answer("Такого пакета Stars нет.", show_alert=True)
+        return
+
+    price = STARS_PACKAGES[amount]["price"]
+    user_id = callback.from_user.id
+    ensure_user(user_id, callback.from_user.username)
+
+    success = remove_coins(user_id, price)
+    if not success:
+        await callback.answer("Недостаточно WesoCoins.", show_alert=True)
+        return
+
+    new_balance = get_balance(user_id)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 @WesolingManager", url=f"https://t.me/{MANAGER_USERNAME}")],
+        [InlineKeyboardButton(text="🚫 Если бан — @oplatawesoling", url=f"https://t.me/{PAYMENT_USERNAME}")],
+        [InlineKeyboardButton(text="⭐ Купить ещё Stars", callback_data="shop_buy_stars")],
+        [InlineKeyboardButton(text="⬅️ В магазин", callback_data="shop_back")]
+    ])
+
+    await callback.message.edit_text(
+        "⭐ <b>Покупка Stars оформлена!</b>\n\n"
+        f"Вы приобрели: <b>{amount} ⭐</b>\n\n"
+        f"Списано: <b>{price} WesoCoins</b>\n"
+        f"💰 Остаток: <b>{new_balance} WesoCoins</b>\n\n"
+        "📩 Для выдачи Stars напишите <b>@WesolingManager</b>\n\n"
+        "⚠️ Если у вас бан — напишите <b>@oplatawesoling</b>\n\n"
+        "Количество выдаваемых Stars соответствует купленному количеству: "
+        f"<b>{amount} ⭐</b>.",
+        reply_markup=keyboard
+    )
+
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            "⭐ <b>Новая покупка Stars</b>\n\n"
+            f"👤 Пользователь: @{callback.from_user.username or 'Не указан'}\n"
+            f"🆔 Telegram ID: <code>{user_id}</code>\n\n"
+            f"⭐ Stars: <b>{amount}</b>\n"
+            f"💎 Списано WesoCoins: <b>{price}</b>\n"
+            f"💰 Остаток: <b>{new_balance}</b>\n\n"
+            f"🕐 Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+        )
+    except Exception:
+        logging.exception("Не удалось уведомить администратора о покупке Stars")
+
+    await callback.answer("Stars оплачены WesoCoins!", show_alert=True)
+
+
+# =========================================================
 # SHOP — PASSES
 # =========================================================
 
@@ -1608,6 +1780,12 @@ async def shop_back(callback: CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
+                    text="⭐ Купить Stars",
+                    callback_data="shop_buy_stars"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🏆 Проходки",
                     callback_data="shop_passes"
                 )
@@ -1625,7 +1803,7 @@ async def shop_back(callback: CallbackQuery):
         "🛒 <b>МАГАЗИН WESOLING</b>\n\n"
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
         "💰 1 WesoCoin = 1 ₽.\n\n"
-        "🎮 UC и проходки оплачиваются "
+        "🎮 UC, ⭐ Stars и проходки оплачиваются "
         "WesoCoins.",
         reply_markup=keyboard
     )
