@@ -5,6 +5,8 @@ import re
 import sqlite3
 from datetime import datetime
 
+import os
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -24,8 +26,6 @@ from aiogram.client.default import DefaultBotProperties
 # НАСТРОЙКИ
 # =========================================================
 
-import os
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
@@ -39,28 +39,31 @@ RULES_USERNAME = "WesolingRules"
 
 DB_NAME = "wesoling.db"
 
-# 1 рубль = 1 WesoCoin
+# 1 WesoCoin = 1 ₽
 COIN_PRICE_RUB = 1
+
 
 # =========================================================
 # ПАКЕТЫ PUBG MOBILE UC
 # =========================================================
 #
 # Себестоимость:
-# 60  UC = 85 ₽
+#
+# 60 UC  = 85 ₽
 # 120 UC = 175 ₽
 # 180 UC = 265 ₽
 # 300 UC = 425 ₽
 # 360 UC = 505 ₽
 #
-# Продажные цены подобраны красиво и находятся
-# в диапазоне наценки от 10% до 15%.
+# Продажные цены:
 #
-# 60  UC: 85  -> 95 ₽  (+11.76%)
-# 120 UC: 175 -> 195 ₽ (+11.43%)
-# 180 UC: 265 -> 295 ₽ (+11.32%)
-# 300 UC: 425 -> 475 ₽ (+11.76%)
-# 360 UC: 505 -> 575 ₽ (+13.86%)
+# 60 UC  = 95 WesoCoins
+# 120 UC = 195 WesoCoins
+# 180 UC = 295 WesoCoins
+# 300 UC = 475 WesoCoins
+# 360 UC = 575 WesoCoins
+#
+# 1 WesoCoin = 1 ₽
 #
 # =========================================================
 
@@ -99,8 +102,6 @@ EMOJI = {
 
 
 def emoji(number: int, fallback: str = "⭐") -> str:
-    # Для custom emoji Telegram нужен специальный HTML.
-    # Если ID не используется, возвращаем обычный emoji.
     return fallback
 
 
@@ -113,7 +114,12 @@ def column_names(cursor, table_name):
     return {row[1] for row in cursor.fetchall()}
 
 
-def add_column_if_missing(cursor, table_name, column_name, definition):
+def add_column_if_missing(
+    cursor,
+    table_name,
+    column_name,
+    definition
+):
     columns = column_names(cursor, table_name)
 
     if column_name not in columns:
@@ -233,7 +239,7 @@ def init_db():
         )
 
     # -----------------------------------------------------
-    # TEAMMATES / SECOND PLAYERS
+    # TEAMMATES
     # -----------------------------------------------------
 
     cursor.execute("""
@@ -284,11 +290,12 @@ def ensure_user(user_id, username=None):
     exists = cursor.fetchone()
 
     if exists:
-        cursor.execute("""
-            UPDATE users
-            SET username = ?
-            WHERE user_id = ?
-        """, (username, user_id))
+        if username is not None:
+            cursor.execute("""
+                UPDATE users
+                SET username = ?
+                WHERE user_id = ?
+            """, (username, user_id))
     else:
         cursor.execute("""
             INSERT INTO users
@@ -383,7 +390,12 @@ def find_user_by_username(username):
 # TOURNAMENTS
 # =========================================================
 
-def create_tournament(name, max_players, tournament_format, entry_price):
+def create_tournament(
+    name,
+    max_players,
+    tournament_format,
+    entry_price
+):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -690,7 +702,6 @@ def save_application(
 
     application_id = cursor.lastrowid
 
-    # Первый игрок
     cursor.execute("""
         INSERT INTO application_players
         (
@@ -710,7 +721,6 @@ def save_application(
         tg_username
     ))
 
-    # Второй игрок
     if second_player:
         cursor.execute("""
             INSERT INTO application_players
@@ -850,6 +860,15 @@ def admin_only(user_id):
     return user_id == ADMIN_ID
 
 
+def payment_contacts_text():
+    return (
+        "💬 <b>Для оплаты/получения товара:</b>\n"
+        f"@{MANAGER_USERNAME}\n\n"
+        "🚫 <b>Если у вас бан:</b>\n"
+        f"@{PAYMENT_USERNAME}"
+    )
+
+
 def tournament_button(tournament, prefix):
     (
         tournament_id,
@@ -886,17 +905,26 @@ def tournament_info(tournament):
 
     if tournament_format == "2x2":
         places = max_players // 2
-        registered = get_accepted_players_count(tournament_id) // 2
-        participants_text = f"{registered}/{places} команд"
+        registered = (
+            get_accepted_players_count(tournament_id) // 2
+        )
+        participants_text = (
+            f"{registered}/{places} команд"
+        )
     else:
-        registered = get_accepted_players_count(tournament_id)
-        participants_text = f"{registered}/{max_players} игроков"
+        registered = get_accepted_players_count(
+            tournament_id
+        )
+        participants_text = (
+            f"{registered}/{max_players} игроков"
+        )
 
     return (
         f"🏆 <b>{name}</b>\n"
         f"🎮 Формат: <b>{tournament_format}</b>\n"
         f"👥 {participants_text}\n"
-        f"💰 Проходка: <b>{entry_price} WesoCoins</b>"
+        f"💰 Проходка: "
+        f"<b>{entry_price} WesoCoins</b>"
     )
 
 
@@ -953,6 +981,11 @@ async def setup_commands():
 
 @dp.message(Command("start"))
 async def start_command(message: Message):
+    ensure_user(
+        message.from_user.id,
+        message.from_user.username
+    )
+
     text = (
         "👋 <b>Добро пожаловать в Wesoling Tournament!</b>\n\n"
         "Это бот турниров Wesoling по PUBG Mobile.\n\n"
@@ -1041,6 +1074,11 @@ async def balance_command(message: Message):
 
 @dp.message(Command("shop"))
 async def shop_command(message: Message):
+    ensure_user(
+        message.from_user.id,
+        message.from_user.username
+    )
+
     balance = get_balance(message.from_user.id)
 
     keyboard = InlineKeyboardMarkup(
@@ -1075,9 +1113,9 @@ async def shop_command(message: Message):
     await message.answer(
         "🛒 <b>МАГАЗИН WESOLING</b>\n\n"
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
-        "WesoCoins можно использовать для оплаты "
-        "проходок на турниры.\n\n"
-        "💰 1 ₽  1⭐ = 1 WesoCoin.",
+        "WesoCoins можно использовать для "
+        "покупки UC и оплаты проходок.\n\n"
+        "💰 1 WesoCoin = 1 ₽.",
         reply_markup=keyboard
     )
 
@@ -1092,7 +1130,13 @@ async def shop_buy_coins(callback: CallbackQuery):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💬 Купить WesoCoins",
+                    text="💬 Написать менеджеру",
+                    url=f"https://t.me/{MANAGER_USERNAME}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚫 Если бан",
                     url=f"https://t.me/{PAYMENT_USERNAME}"
                 )
             ],
@@ -1108,13 +1152,14 @@ async def shop_buy_coins(callback: CallbackQuery):
     await callback.message.edit_text(
         "💎 <b>Покупка WesoCoins</b>\n\n"
         "Курс:\n"
-        "<b>1 ₽  1⭐ = 1 WesoCoin</b>\n\n"
+        "<b>1 ₽ = 1 WesoCoin</b>\n"
+        "<b>1⭐ = 1 WesoCoin</b>\n\n"
         "Например:\n"
         "50 ₽ = 50 WesoCoins\n"
         "100 ₽ = 100 WesoCoins\n"
         "250 ₽ = 250 WesoCoins\n\n"
-        "Для покупки напишите:\n"
-        f"@{MANAGER_USERNAME}\n"
+        "Для оплаты напишите менеджеру:\n"
+        f"@{MANAGER_USERNAME}\n\n"
         "Если у вас бан:\n"
         f"@{PAYMENT_USERNAME}",
         reply_markup=keyboard
@@ -1129,12 +1174,21 @@ async def shop_buy_coins(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "shop_buy_uc")
 async def shop_buy_uc(callback: CallbackQuery):
+    ensure_user(
+        callback.from_user.id,
+        callback.from_user.username
+    )
+
+    balance = get_balance(
+        callback.from_user.id
+    )
+
     buttons = []
 
     for amount, price in UC_PACKAGES.items():
         buttons.append([
             InlineKeyboardButton(
-                text=f"🎮 {amount} UC — {price} ₽",
+                text=f"🎮 {amount} UC — {price} WesoCoins",
                 callback_data=f"shop_uc:{amount}"
             )
         ])
@@ -1148,9 +1202,12 @@ async def shop_buy_uc(callback: CallbackQuery):
 
     await callback.message.edit_text(
         "🎮 <b>Покупка UC</b>\n\n"
+        f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
         "Выберите нужное количество UC:\n\n"
-        "💰 Цена уже указана с наценкой 10–15%.\n"
-        "💳 Для оплаты напишите менеджеру.",
+        "💳 Оплата производится "
+        "<b>только WesoCoins</b>.\n"
+        "После покупки напишите менеджеру "
+        "для выдачи UC.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=buttons
         )
@@ -1159,10 +1216,16 @@ async def shop_buy_uc(callback: CallbackQuery):
     await callback.answer()
 
 
+# =========================================================
+# SHOP — UC SELECT
+# =========================================================
+
 @dp.callback_query(F.data.startswith("shop_uc:"))
 async def shop_uc(callback: CallbackQuery):
     try:
-        amount = int(callback.data.split(":")[1])
+        amount = int(
+            callback.data.split(":")[1]
+        )
     except (ValueError, IndexError):
         await callback.answer(
             "Некорректное количество UC.",
@@ -1179,12 +1242,54 @@ async def shop_uc(callback: CallbackQuery):
 
     price = UC_PACKAGES[amount]
 
+    ensure_user(
+        callback.from_user.id,
+        callback.from_user.username
+    )
+
+    balance = get_balance(
+        callback.from_user.id
+    )
+
+    if balance < price:
+        await callback.message.edit_text(
+            "❌ <b>Недостаточно WesoCoins</b>\n\n"
+            f"🎮 Пакет: <b>{amount} UC</b>\n"
+            f"💰 Стоимость: <b>{price} WesoCoins</b>\n"
+            f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
+            f"Вам не хватает: "
+            f"<b>{price - balance} WesoCoins</b>\n\n"
+            "Пополните баланс и попробуйте снова.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💎 Купить WesoCoins",
+                            callback_data="shop_buy_coins"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад",
+                            callback_data="shop_buy_uc"
+                        )
+                    ]
+                ]
+            )
+        )
+
+        await callback.answer(
+            "Недостаточно WesoCoins.",
+            show_alert=True
+        )
+        return
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💬 Купить UC",
-                    url=f"https://t.me/{PAYMENT_USERNAME}"
+                    text="✅ Купить за WesoCoins",
+                    callback_data=f"confirm_uc:{amount}"
                 )
             ],
             [
@@ -1197,15 +1302,137 @@ async def shop_uc(callback: CallbackQuery):
     )
 
     await callback.message.edit_text(
-        "🎮 <b>Покупка UC</b>\n\n"
+        "🎮 <b>Подтверждение покупки</b>\n\n"
         f"📦 Количество: <b>{amount} UC</b>\n"
-        f"💰 Стоимость: <b>{price} ₽</b>\n\n"
-        "Для покупки напишите менеджеру:\n"
-        f"@{PAYMENT_USERNAME}",
+        f"💰 Стоимость: <b>{price} WesoCoins</b>\n"
+        f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
+        "После подтверждения WesoCoins будут "
+        "списаны с вашего баланса.\n\n"
+        "Продолжить?",
         reply_markup=keyboard
     )
 
     await callback.answer()
+
+
+# =========================================================
+# SHOP — CONFIRM UC PURCHASE
+# =========================================================
+
+@dp.callback_query(
+    F.data.startswith("confirm_uc:")
+)
+async def confirm_uc_purchase(
+    callback: CallbackQuery
+):
+    try:
+        amount = int(
+            callback.data.split(":")[1]
+        )
+    except (ValueError, IndexError):
+        await callback.answer(
+            "Ошибка покупки.",
+            show_alert=True
+        )
+        return
+
+    if amount not in UC_PACKAGES:
+        await callback.answer(
+            "Такого пакета UC нет.",
+            show_alert=True
+        )
+        return
+
+    price = UC_PACKAGES[amount]
+
+    user_id = callback.from_user.id
+
+    ensure_user(
+        user_id,
+        callback.from_user.username
+    )
+
+    # Списываем WesoCoins.
+    success = remove_coins(
+        user_id,
+        price
+    )
+
+    if not success:
+        await callback.answer(
+            "Недостаточно WesoCoins.",
+            show_alert=True
+        )
+        return
+
+    new_balance = get_balance(user_id)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💬 @WesolingManager",
+                    url=f"https://t.me/{MANAGER_USERNAME}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚫 Если бан — @oplatawesoling",
+                    url=f"https://t.me/{PAYMENT_USERNAME}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎮 Купить ещё UC",
+                    callback_data="shop_buy_uc"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ В магазин",
+                    callback_data="shop_back"
+                )
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
+        "✅ <b>Покупка UC оформлена!</b>\n\n"
+        f"🎮 UC: <b>{amount}</b>\n"
+        f"💎 Списано: <b>{price} WesoCoins</b>\n"
+        f"💰 Остаток: <b>{new_balance} WesoCoins</b>\n\n"
+        "📦 <b>Для выдачи UC напишите:</b>\n"
+        f"@{MANAGER_USERNAME}\n\n"
+        "🚫 <b>Если у вас бан:</b>\n"
+        f"@{PAYMENT_USERNAME}\n\n"
+        "Укажите менеджеру количество купленных UC.",
+        reply_markup=keyboard
+    )
+
+    # Уведомляем администратора о покупке.
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            "🎮 <b>Новая покупка UC</b>\n\n"
+            f"👤 Пользователь: "
+            f"@{callback.from_user.username or 'Не указан'}\n"
+            f"🆔 Telegram ID: "
+            f"<code>{user_id}</code>\n\n"
+            f"🎮 UC: <b>{amount}</b>\n"
+            f"💎 Списано WesoCoins: <b>{price}</b>\n"
+            f"💰 Остаток: <b>{new_balance}</b>\n\n"
+            f"🕐 Время: "
+            f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+        )
+    except Exception:
+        logging.exception(
+            "Не удалось уведомить администратора о покупке UC"
+        )
+
+    await callback.answer(
+        "UC оплачены WesoCoins!",
+        show_alert=True
+    )
 
 
 # =========================================================
@@ -1236,6 +1463,7 @@ async def shop_passes(callback: CallbackQuery):
 
     await callback.message.edit_text(
         "🏆 <b>Проходки на турниры</b>\n\n"
+        "Проходка оплачивается WesoCoins.\n\n"
         "Выберите турнир:",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=buttons
@@ -1249,7 +1477,9 @@ async def shop_passes(callback: CallbackQuery):
 # SHOP — TOURNAMENT
 # =========================================================
 
-@dp.callback_query(F.data.startswith("shop_tournament:"))
+@dp.callback_query(
+    F.data.startswith("shop_tournament:")
+)
 async def shop_tournament(callback: CallbackQuery):
     tournament_id = int(
         callback.data.split(":")[1]
@@ -1265,23 +1495,29 @@ async def shop_tournament(callback: CallbackQuery):
         return
 
     price = tournament[4]
-    balance = get_balance(callback.from_user.id)
+    balance = get_balance(
+        callback.from_user.id
+    )
 
     if tournament[3] == "2x2":
         text = (
             f"🏆 <b>{tournament[1]}</b>\n\n"
             "🎮 Формат: <b>2×2</b>\n"
-            f"💰 Проходка команды: <b>{price} WesoCoins</b>\n\n"
+            f"💰 Проходка команды: "
+            f"<b>{price} WesoCoins</b>\n\n"
             "Проходка оплачивается одним человеком "
             "при регистрации команды.\n\n"
-            f"💎 Ваш баланс: <b>{balance}</b>"
+            f"💎 Ваш баланс: <b>{balance}</b>\n\n"
+            "Оплата производится WesoCoins."
         )
     else:
         text = (
             f"🏆 <b>{tournament[1]}</b>\n\n"
             "🎮 Формат: <b>1×1</b>\n"
-            f"💰 Проходка: <b>{price} WesoCoins</b>\n\n"
-            f"💎 Ваш баланс: <b>{balance}</b>"
+            f"💰 Проходка: "
+            f"<b>{price} WesoCoins</b>\n\n"
+            f"💎 Ваш баланс: <b>{balance}</b>\n\n"
+            "Оплата производится WesoCoins."
         )
 
     keyboard = InlineKeyboardMarkup(
@@ -1329,20 +1565,32 @@ async def shop_info(callback: CallbackQuery):
     await callback.message.edit_text(
         "🎁 <b>Как получить WesoCoins?</b>\n\n"
         "💰 Купить за рубли\n"
+        "⭐ Купить за Telegram Stars\n"
         "🏆 Получить за победу в турнире\n"
         "🎉 Получить в розыгрыше\n"
         "🎁 Получить от администратора\n\n"
-        "WesoCoins можно тратить на проходки "
-        "турниров.",
+        "WesoCoins можно тратить на:\n"
+        "🎮 UC\n"
+        "🏆 Проходки на турниры\n\n"
+        "💬 Для покупки WesoCoins:\n"
+        f"@{MANAGER_USERNAME}\n\n"
+        "🚫 Если у вас бан:\n"
+        f"@{PAYMENT_USERNAME}",
         reply_markup=keyboard
     )
 
     await callback.answer()
 
 
+# =========================================================
+# SHOP BACK
+# =========================================================
+
 @dp.callback_query(F.data == "shop_back")
 async def shop_back(callback: CallbackQuery):
-    balance = get_balance(callback.from_user.id)
+    balance = get_balance(
+        callback.from_user.id
+    )
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -1376,7 +1624,9 @@ async def shop_back(callback: CallbackQuery):
     await callback.message.edit_text(
         "🛒 <b>МАГАЗИН WESOLING</b>\n\n"
         f"💎 Ваш баланс: <b>{balance} WesoCoins</b>\n\n"
-        "1 ₽  1⭐ = 1 WesoCoin.",
+        "💰 1 WesoCoin = 1 ₽.\n\n"
+        "🎮 UC и проходки оплачиваются "
+        "WesoCoins.",
         reply_markup=keyboard
     )
 
@@ -1405,7 +1655,11 @@ async def shop_registration(
         )
         return
 
-    if tournament[4] > get_balance(callback.from_user.id):
+    price = tournament[4]
+
+    if price > get_balance(
+        callback.from_user.id
+    ):
         await callback.answer(
             "Недостаточно WesoCoins.",
             show_alert=True
@@ -1422,7 +1676,8 @@ async def shop_registration(
         f"📝 <b>Регистрация</b>\n\n"
         f"🏆 {tournament[1]}\n"
         f"🎮 Формат: {tournament[3]}\n"
-        f"💰 Проходка: {tournament[4]} WesoCoins\n\n"
+        f"💰 Проходка: "
+        f"{tournament[4]} WesoCoins\n\n"
         "<b>1/5</b>\n"
         "Введите ник первого игрока:"
     )
@@ -1536,11 +1791,14 @@ async def registration_tournament(
 
     price = tournament[4]
 
-    if price > get_balance(callback.from_user.id):
+    if price > get_balance(
+        callback.from_user.id
+    ):
         await callback.answer(
             f"Недостаточно WesoCoins.\n"
             f"Нужно: {price}\n"
-            f"У вас: {get_balance(callback.from_user.id)}",
+            f"У вас: "
+            f"{get_balance(callback.from_user.id)}",
             show_alert=True
         )
         return
@@ -1553,7 +1811,8 @@ async def registration_tournament(
         f"📝 <b>Регистрация</b>\n\n"
         f"🏆 <b>{tournament[1]}</b>\n"
         f"🎮 Формат: <b>{tournament[3]}</b>\n"
-        f"💰 Проходка: <b>{price} WesoCoins</b>\n\n"
+        f"💰 Проходка: "
+        f"<b>{price} WesoCoins</b>\n\n"
         "<b>1/5</b>\n"
         "Введите ник первого игрока:"
     )
@@ -1709,11 +1968,27 @@ async def registration_player1_tg_username(
     else:
         await message.answer(
             "<b>5/5</b>\n"
-            "Как будете оплачивать участие?\n\n"
-            "Напишите: <b>Рубли</b> или <b>WesoCoins</b>\n\n"
-            "Для оплаты:\n"
-            f"@{MANAGER_USERNAME}\n"
-            f"Если у вас бан — @{PAYMENT_USERNAME}"
+            "Подтвердите участие.\n\n"
+            f"💰 Стоимость: "
+            f"<b>{tournament[4]} WesoCoins</b>\n\n"
+            "WesoCoins будут списаны после "
+            "отправки заявки."
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Отправить заявку",
+                        callback_data="confirm_registration"
+                    )
+                ]
+            ]
+        )
+
+        await message.answer(
+            "Нажмите кнопку ниже:",
+            reply_markup=keyboard
         )
 
         await state.set_state(
@@ -1841,13 +2116,35 @@ async def registration_player2_tg_username(
         player2_tg_username=username
     )
 
+    data = await state.get_data()
+
+    tournament = get_tournament(
+        data["tournament_id"]
+    )
+
     await message.answer(
         "<b>5/5</b>\n"
-        "Как будете оплачивать участие?\n\n"
-        "Напишите: <b>WesoCoins</b>\n\n"
-        "Для оплаты:\n"
-        f"@{MANAGER_USERNAME}\n"
-        f"Если у вас бан — @{PAYMENT_USERNAME}"
+        "Подтвердите регистрацию команды.\n\n"
+        f"💰 Стоимость: "
+        f"<b>{tournament[4]} WesoCoins</b>\n\n"
+        "WesoCoins будут списаны после "
+        "отправки заявки."
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Отправить заявку",
+                    callback_data="confirm_registration"
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        "Нажмите кнопку ниже:",
+        reply_markup=keyboard
     )
 
     await state.set_state(
@@ -1856,36 +2153,25 @@ async def registration_player2_tg_username(
 
 
 # =========================================================
-# PAYMENT / SAVE APPLICATION
+# CONFIRM REGISTRATION
 # =========================================================
 
-@dp.message(Registration.payment)
-async def registration_payment(
-    message: Message,
+@dp.callback_query(
+    F.data == "confirm_registration"
+)
+async def confirm_registration(
+    callback: CallbackQuery,
     state: FSMContext
 ):
-    if not message.text:
-        await message.answer(
-            "Укажите способ оплаты."
-        )
-        return
-
-    payment = message.text.strip()
-
-    if payment.lower() not in (
-        "weso",
-        "wesocoins",
-        "рубли",
-        "рубль",
-        "руб"
-    ):
-        await message.answer(
-            "Напишите <b>Рубли</b> или "
-            "<b>WesoCoins</b>."
-        )
-        return
-
     data = await state.get_data()
+
+    if not data or "tournament_id" not in data:
+        await callback.answer(
+            "Сессия регистрации истекла.",
+            show_alert=True
+        )
+        await state.clear()
+        return
 
     tournament_id = data["tournament_id"]
 
@@ -1896,8 +2182,9 @@ async def registration_payment(
     if not tournament or tournament[5] != "active":
         await state.clear()
 
-        await message.answer(
-            "Турнир больше не существует или закрыт."
+        await callback.answer(
+            "Турнир больше не существует или закрыт.",
+            show_alert=True
         )
         return
 
@@ -1905,42 +2192,68 @@ async def registration_payment(
         tournament_id
     )
 
-    if current_players >= tournament[2]:
+    team_size = (
+        2
+        if tournament[3] == "2x2"
+        else 1
+    )
+
+    if current_players + team_size > tournament[2]:
         await state.clear()
 
-        await message.answer(
-            "К сожалению, пока ты заполнял форму, "
+        await callback.message.edit_text(
+            "❌ К сожалению, пока ты заполнял форму, "
             "турнир уже заполнился."
         )
+
+        await callback.answer()
         return
 
     existing = user_has_application(
         tournament_id,
-        message.from_user.id
+        callback.from_user.id
     )
 
     if existing:
         await state.clear()
 
-        await message.answer(
-            "Ты уже отправлял заявку на этот турнир."
+        await callback.message.edit_text(
+            "❌ Ты уже отправлял заявку на этот турнир."
         )
+
+        await callback.answer()
         return
 
     price = tournament[4]
 
-    # В этом боте регистрация через WesoCoins.
-    if payment.lower() in (
-        "weso",
-        "wesocoins"
-    ):
-        if get_balance(message.from_user.id) < price:
-            await message.answer(
-                "❌ Недостаточно WesoCoins.\n\n"
-                f"Нужно: <b>{price}</b>\n"
-                f"У вас: <b>{get_balance(message.from_user.id)}</b>"
-            )
-            return
+    balance = get_balance(
+        callback.from_user.id
+    )
+
+    if balance < price:
+        await callback.answer(
+            f"Недостаточно WesoCoins.\n"
+            f"Нужно: {price}\n"
+            f"У вас: {balance}",
+            show_alert=True
+        )
+        return
+
+    # -----------------------------------------------------
+    # СПИСЫВАЕМ WESOCOINS
+    # -----------------------------------------------------
+
+    success = remove_coins(
+        callback.from_user.id,
+        price
+    )
+
+    if not success:
+        await callback.answer(
+            "Не удалось списать WesoCoins.",
+            show_alert=True
+        )
+        return
 
     second_player = None
 
@@ -1954,45 +2267,44 @@ async def registration_payment(
 
     application_id = save_application(
         tournament_id=tournament_id,
-        user_id=message.from_user.id,
-        username=message.from_user.username,
+        user_id=callback.from_user.id,
+        username=callback.from_user.username,
         nickname=data["player1_nickname"],
         timezone=data["player1_timezone"],
         game_id=data["player1_game_id"],
-        payment=payment,
+        payment="WesoCoins",
         tg_username=data["player1_tg_username"],
         second_player=second_player
     )
 
-    # Если оплачивается WesoCoins — списываем сразу.
-    if payment.lower() in (
-        "weso",
-        "wesocoins"
-    ):
-        remove_coins(
-            message.from_user.id,
-            price
-        )
+    new_balance = get_balance(
+        callback.from_user.id
+    )
 
     await state.clear()
 
-    await message.answer(
+    await callback.message.edit_text(
         "✅ <b>Заявка отправлена!</b>\n\n"
+        f"🏆 Турнир: <b>{tournament[1]}</b>\n"
+        f"💎 Списано: <b>{price} WesoCoins</b>\n"
+        f"💰 Остаток: <b>{new_balance} WesoCoins</b>\n\n"
         "Ожидайте ответа от модерации.\n\n"
-        "💳 Для оплаты напишите:\n"
+        f"💬 Если появятся вопросы: "
         f"@{MANAGER_USERNAME}\n"
-        f"Если у вас бан — @{PAYMENT_USERNAME}"
+        f"🚫 Если у вас бан: @{PAYMENT_USERNAME}"
     )
 
     admin_text = (
         f"📨 <b>Новая заявка #{application_id}</b>\n\n"
         f"🏆 <b>Турнир:</b> {tournament[1]}\n"
         f"🎮 <b>Формат:</b> {tournament[3]}\n"
-        f"💰 <b>Стоимость:</b> {price} WesoCoins\n\n"
+        f"💰 <b>Стоимость:</b> "
+        f"{price} WesoCoins\n"
+        f"💳 <b>Оплата:</b> WesoCoins\n\n"
         f"👤 Регистратор: "
-        f"@{message.from_user.username or 'Не указан'}\n"
+        f"@{callback.from_user.username or 'Не указан'}\n"
         f"🆔 Telegram ID: "
-        f"<code>{message.from_user.id}</code>\n\n"
+        f"<code>{callback.from_user.id}</code>\n\n"
         f"👤 <b>Игрок 1</b>\n"
         f"🎮 Ник: {data['player1_nickname']}\n"
         f"🌍 Часовой пояс: {data['player1_timezone']}\n"
@@ -2011,8 +2323,7 @@ async def registration_payment(
         )
 
     admin_text += (
-        f"\n💳 <b>Оплата:</b> {payment}\n"
-        f"🕐 <b>Время:</b> "
+        f"\n🕐 <b>Время:</b> "
         f"{datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
@@ -2041,6 +2352,25 @@ async def registration_payment(
         logging.exception(
             "Не удалось отправить заявку админу"
         )
+
+    await callback.answer(
+        "Заявка отправлена!"
+    )
+
+
+# =========================================================
+# OLD PAYMENT STATE
+# =========================================================
+
+@dp.message(Registration.payment)
+async def registration_payment(
+    message: Message,
+    state: FSMContext
+):
+    await message.answer(
+        "Используйте кнопку "
+        "«✅ Отправить заявку» выше."
+    )
 
 
 # =========================================================
@@ -2338,7 +2668,8 @@ async def create_tournament_entry_price(
         f"🏆 Название: <b>{data['tournament_name']}</b>\n"
         f"🎮 Формат: <b>{data['tournament_format']}</b>\n"
         f"👥 Места: <b>{places_text}</b>\n"
-        f"💰 Проходка: <b>{entry_price} WesoCoins</b>\n"
+        f"💰 Проходка: "
+        f"<b>{entry_price} WesoCoins</b>\n"
         f"🆔 ID: <code>{tournament_id}</code>"
     )
 
@@ -2605,7 +2936,8 @@ async def delete_tournament_callback(
         "⚠️ <b>Удалить турнир?</b>\n\n"
         f"🏆 {tournament[1]}\n"
         f"🎮 Формат: {tournament[3]}\n"
-        f"💰 Проходка: {tournament[4]} WesoCoins\n\n"
+        f"💰 Проходка: "
+        f"{tournament[4]} WesoCoins\n\n"
         "Все заявки также будут удалены.",
         reply_markup=keyboard
     )
@@ -3083,10 +3415,6 @@ async def setka_tournament_callback(
         f"🎮 Формат: <b>{tournament[3]}</b>\n\n"
     )
 
-    # -----------------------------------------------------
-    # 1x1
-    # -----------------------------------------------------
-
     if tournament[3] == "1x1":
         if len(applications) % 2 != 0:
             await callback.message.answer(
@@ -3111,11 +3439,15 @@ async def setka_tournament_callback(
                 f"{p2[3]}\n\n"
             )
 
-    # -----------------------------------------------------
-    # 2x2
-    # -----------------------------------------------------
-
     else:
+        if len(applications) % 2 != 0:
+            await callback.message.answer(
+                "⛔ Для генерации сетки 2×2 "
+                "нужно чётное количество команд."
+            )
+            await callback.answer()
+            return
+
         for match_number in range(
             0,
             len(applications),
@@ -3133,7 +3465,8 @@ async def setka_tournament_callback(
             )
 
             text += (
-                f"⚔️ <b>Матч {match_number // 2 + 1}</b>\n\n"
+                f"⚔️ <b>Матч "
+                f"{match_number // 2 + 1}</b>\n\n"
                 "🔵 <b>Команда 1</b>\n"
             )
 
@@ -3148,6 +3481,7 @@ async def setka_tournament_callback(
             text += "\n"
 
     await callback.message.answer(text)
+
     await callback.answer(
         "Сетка создана!"
     )
@@ -3216,6 +3550,16 @@ async def accept_application(
             "rejected"
         )
 
+        # Возврат WesoCoins
+        if payment.lower() in (
+            "weso",
+            "wesocoins"
+        ):
+            add_coins(
+                user_id,
+                tournament[4] if tournament else 0
+            )
+
         await callback.answer(
             "Турнир больше недоступен.",
             show_alert=True
@@ -3226,7 +3570,11 @@ async def accept_application(
         tournament_id
     )
 
-    team_size = 2 if tournament[3] == "2x2" else 1
+    team_size = (
+        2
+        if tournament[3] == "2x2"
+        else 1
+    )
 
     if players_count + team_size > tournament[2]:
         await callback.answer(
@@ -3246,9 +3594,9 @@ async def accept_application(
             "✅ <b>Ваша заявка принята!</b>\n\n"
             f"🏆 Турнир: <b>{tournament[1]}</b>\n"
             f"🎮 Формат: <b>{tournament[3]}</b>\n\n"
-            "💬 Свяжитесь с менеджером:\n"
+            f"💬 Если появятся вопросы:\n"
             f"@{MANAGER_USERNAME}\n\n"
-            "Если у вас бан:\n"
+            f"🚫 Если у вас бан:\n"
             f"@{PAYMENT_USERNAME}"
         )
     except Exception:
@@ -3321,12 +3669,11 @@ async def reject_application(
         )
         return
 
-    # Если WesoCoins были списаны при отправке заявки,
-    # при отклонении возвращаем их.
     tournament = get_tournament(
         tournament_id
     )
 
+    # Возвращаем WesoCoins при отклонении.
     if tournament and payment.lower() in (
         "weso",
         "wesocoins"
@@ -3345,8 +3692,13 @@ async def reject_application(
         await bot.send_message(
             user_id,
             "❌ <b>Ваша заявка отклонена.</b>\n\n"
+            "💎 WesoCoins за проходку "
+            "были возвращены на ваш баланс.\n\n"
             "Если вы считаете, что произошла ошибка, "
-            "обратитесь в поддержку."
+            "обратитесь к менеджеру:\n"
+            f"@{MANAGER_USERNAME}\n\n"
+            "🚫 Если у вас бан:\n"
+            f"@{PAYMENT_USERNAME}"
         )
     except Exception:
         logging.exception(
@@ -3366,7 +3718,7 @@ async def reject_application(
 
 
 # =========================================================
-# FALLBACK FOR UNKNOWN CALLBACKS
+# FALLBACK
 # =========================================================
 
 @dp.callback_query()
